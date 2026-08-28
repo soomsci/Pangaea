@@ -142,8 +142,7 @@ input[type=range]{width:190px;accent-color:var(--accent)}
   <div class="console">
   <div class="bar">
     <span class="tag">단계</span>
-    <button class="b" id="s1" aria-pressed="true">1단계 · 남아메리카 &amp; 아프리카</button>
-    <button class="b" id="s2" aria-pressed="false">2단계 · 판게아 전체</button>
+    <span id="stageBtns" style="display:flex;gap:8px;flex-wrap:wrap"></span>
     <span class="sep"></span>
     <button class="b" id="mPuzzle" aria-pressed="true">직접 맞추기</button>
     <button class="b" id="mPlay" aria-pressed="false">자동 재생</button>
@@ -303,19 +302,44 @@ const PIECES = [
    ponytail: 손으로 맞춘 근사값. 정밀 고지리 복원이 필요하면 GPlates 회전
    파일(.rot)을 읽어 오일러 극 회전으로 교체할 것. 중2 수준에서는 불필요. */
 const TARGET = {
-  af: {x:566, y:286, rot:0},
-  sa: {x:492, y:362, rot:-44},
-  na: {x:409, y:123, rot:14},
-  eu: {x:782, y:107, rot:-12},
-  in: {x:693, y:287, rot:-38},
-  oc: {x:758, y:372, rot:-40},
-  an: {x:610, y:456, rot:10},
+  af: {x:566, y:286, rot:0.0},
+  sa: {x:513, y:339, rot:-52.1},
+  na: {x:431, y:145, rot:18.0},
+  eu: {x:771, y:129, rot:-17.9},
+  in: {x:691, y:274, rot:-36.2},
+  oc: {x:746, y:369, rot:-42.5},
+  an: {x:597, y:436, rot:5.1},
 };
 
-/* 아프리카는 판게아 복원에서 기준으로 쓰이는 대륙이다.
-   미리 제자리에 고정해 두면 학생에게 기준점이 생겨 퍼즐이 풀 수 있는 문제가 된다. */
-const ANCHOR = "af";
-const STAGE1 = ["af", "sa"];
+/* 학습 단계. 각 단계의 anchor 는 미리 제자리에 고정된다 —
+   기준점이 있어야 학생이 나머지를 어디에 놓을지 판단할 수 있다.
+   pieces 가 null 이면 전체 대륙. */
+const STAGES = [
+  {label:"① 남미·아프리카", pieces:["af", "sa"], anchor:"af",
+   hint:"아프리카는 고정되어 있습니다. 남아메리카를 끌어다 대서양을 닫아보세요. " +
+        "조각을 누르면 위에 회전 손잡이가 생깁니다.",
+   done:"대서양이 닫혔습니다! 다른 대륙끼리도 맞을까요?"},
+
+  {label:"② 호주·남극", pieces:["an", "oc"], anchor:"an",
+   hint:"대서양만 그런 게 아닙니다. 남극을 기준으로 오스트레일리아를 맞춰보세요. " +
+        "이 둘은 가장 늦게(약 4천만 년 전) 갈라진 대륙입니다.",
+   done:"여기도 맞습니다. 우연이 두 번 반복될까요?"},
+
+  {label:"③ 곤드와나", pieces:["af", "in", "an"], anchor:"af",
+   hint:"아프리카 · 인도 · 남극. 다 맞춘 뒤 아래에서 화석 분포를 켜보세요. " +
+        "리스트로사우루스와 글로소프테리스가 세 대륙을 가로질러 이어집니다.",
+   done:"곤드와나 완성! 이제 화석 분포를 켜보세요."},
+
+  {label:"④ 로라시아", pieces:["af", "na", "eu"], anchor:"af",
+   hint:"북아메리카 동해안이 아프리카 북서안에, 유럽이 그 위에 붙습니다. " +
+        "남미–아프리카만큼 딱 맞지는 않은데, 고위도라 지도 도법에서 동서로 늘어난 탓입니다.",
+   done:"로라시아 완성! 이제 판게아 전체를 맞춰볼까요?"},
+
+  {label:"⑤ 판게아 전체", pieces:null, anchor:"af",
+   hint:"아프리카를 기준으로 나머지 여섯 대륙을 모두 맞춰보세요. " +
+        "남극은 지도 도법 때문에 다른 대륙과 모양이 다르게 보입니다.",
+   done:"판게아 완성! 증거를 겹쳐보고, ②번 탭에서 왜 움직였는지 알아보세요."},
+];
 
 const SNAP_DIST = 30;   // px
 const SNAP_ANG  = 15;   // 도
@@ -325,12 +349,17 @@ const COLOR = {
   in:"#9b6fb8", oc:"#c9ad3e", an:"#8e9ba6",
 };
 
-/* 대륙 경계를 넘어 이어지는 화석. (조각, 경도, 위도) */
+/* 대륙 경계를 넘어 이어지는 화석. (조각, 경도, 위도)
+   좌표는 실제 화석 산지를 하나하나 옮긴 것이 아니라, 각 대륙에서 그 화석이
+   나오는 지역을 대표하는 개략 위치다. 판게아로 모았을 때 띠가 대륙 경계를
+   넘어 이어진다는 것을 보이는 것이 목적이다. */
 const FOSSILS = [
   ["메소사우루스","#7b3f9d", [["sa",-54,-31],["sa",-50,-26],["af",17,-29],["af",21,-24]]],
   ["키노그나투스","#1f7a5a", [["sa",-61,-34],["sa",-57,-29],["af",25,-22],["af",29,-13]]],
-  ["리스트로사우루스","#b5651d",[["af",27,-29],["in",78,22],["an",30,-72],["an",-20,-74]]],
-  ["글로소프테리스","#2f6d8c",[["sa",-57,-38],["af",24,-32],["in",80,19],
+  ["리스트로사우루스","#b5651d",[["af",27,-29],["in",78,22],["in",74,19],
+                              ["an",30,-72],["an",-20,-74],["an",15,-70]]],
+  ["글로소프테리스","#2f6d8c",[["sa",-57,-38],["af",24,-32],["af",30,-24],
+                              ["in",80,19],["in",76,16],
                               ["oc",139,-30],["oc",146,-25],["an",0,-73],["an",95,-70]]],
 ];
 
@@ -360,7 +389,8 @@ function projLocal(p, lon, lat) {
 const byId = {}; PIECES.forEach(p => byId[p.id] = p);
 const st = {};   // 조각별 현재 {x,y,rot,locked}
 const g = {};    // 조각별 <g> 엘리먼트
-let stage = 1, mode = "puzzle", sel = null, saved = null;
+const bbox = {};          // 조각별 로컬 바운딩 박스 (화면 틀 계산에 쓴다)
+let stage = 0, mode = "puzzle", sel = null, saved = null;
 
 /* ---------------- 초기 렌더 ---------------- */
 function buildGrid() {
@@ -405,6 +435,8 @@ function buildPieces() {
     grp.appendChild(gl); grp.appendChild(fo);
     host.appendChild(grp);
     g[p.id] = grp;
+    // 여기서 한 번만 재 둔다. 나중엔 숨겨진 조각이 있어 getBBox 가 0을 준다.
+    bbox[p.id] = grp.querySelector(".land").getBBox();
 
     const lb = el("text", {class:`plabel lb-${p.id}`, "font-size":19,
       "font-weight":700, fill:"#fff", "stroke":"rgba(0,0,0,.45)",
@@ -421,17 +453,49 @@ function setPiece(id, x, y, rot) {
   if (lb) { lb.setAttribute("x", x.toFixed(1)); lb.setAttribute("y", (y + 5).toFixed(1)); }
 }
 
-function inStage(id) { return stage === 2 || STAGE1.includes(id); }
+const S = () => STAGES[stage];
+const stagePieces = () => S().pieces || PIECES.map(p => p.id);
+function inStage(id) { return stagePieces().includes(id); }
 
-/* 1단계는 두 대륙만 쓰므로 화면을 좁혀 크게 보여준다.
+/* 단계마다 쓰는 대륙이 달라 화면 틀을 그때그때 계산한다. 조각이 현재 위치에서
+   판게아 위치까지 움직여야 하므로 양쪽 위치를 모두 담고 여백을 준다.
    드래그 좌표 변환은 getScreenCTM 이 viewBox 를 반영하므로 손댈 것이 없다. */
-const VIEW = {1:"255 160 545 340", 2:"0 0 1200 600"};
+function frame() {
+  // 가로세로비는 강제하지 않고 범위로만 제한한다. 곤드와나처럼 세로로 긴
+  // 배치에 넓은 비율을 강요하면 양옆이 빈 바다로만 채워진다.
+  const PAD = 34, MIN_A = 1.3, MAX_A = 2.1;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const id of stagePieces()) {
+    const bb = bbox[id];
+    for (const pos of [byId[id].present, TARGET[id]]) {
+      const t = pos.rot * Math.PI / 180, c = Math.cos(t), sn = Math.sin(t);
+      for (const lx of [bb.x, bb.x + bb.width])
+        for (const ly of [bb.y, bb.y + bb.height]) {
+          const wx = pos.x + lx*c - ly*sn, wy = pos.y + lx*sn + ly*c;
+          x0 = Math.min(x0, wx); y0 = Math.min(y0, wy);
+          x1 = Math.max(x1, wx); y1 = Math.max(y1, wy);
+        }
+    }
+  }
+  // 회전한 바운딩 박스의 AABB 는 실제 대륙 모양보다 넉넉하다. 유라시아처럼
+  // 가로로 긴 조각을 돌리면 지도 밖까지 밀려나므로 지도 범위로 잘라낸다.
+  x0 = Math.max(0, x0 - PAD); y0 = Math.max(0, y0 - PAD);
+  x1 = Math.min(1200, x1 + PAD); y1 = Math.min(600, y1 + PAD);
+  let w = x1 - x0, h = y1 - y0;
+  if (w / h < MIN_A) { const n = h * MIN_A; x0 -= (n - w) / 2; w = n; }
+  else if (w / h > MAX_A) { const n = w / MAX_A; y0 -= (n - h) / 2; h = n; }
+  // 비율을 맞추다 지도 밖으로 나갔으면 크기는 두고 안쪽으로 밀어 넣는다
+  x0 = Math.min(Math.max(0, x0), Math.max(0, 1200 - w));
+  y0 = Math.min(Math.max(0, y0), Math.max(0, 600 - h));
+  return [x0, y0, w, h];
+}
+
 let viewK = 1;
 
-/* 1단계는 viewBox 를 좁히므로 그 안의 글자·점·선이 그만큼 커 보인다.
-   화면상 크기가 두 단계에서 같아지도록 되돌린다. */
-function applyScale() {
-  viewK = parseFloat(VIEW[stage].split(" ")[2]) / 1200;
+/* 단계마다 viewBox 폭이 다르므로 그 안의 글자·점·선이 커 보이거나 작아 보인다.
+   화면상 크기가 어느 단계에서나 같아지도록 되돌린다. */
+function applyScale(vbWidth) {
+  viewK = vbWidth / 1200;
   const set = (sel, attrs) => svg.querySelectorAll(sel).forEach(n => {
     for (const k in attrs) n.setAttribute(k, attrs[k]);
   });
@@ -443,8 +507,9 @@ function applyScale() {
 }
 
 function applyStage() {
-  svg.setAttribute("viewBox", VIEW[stage]);
-  applyScale();
+  const box = frame();
+  svg.setAttribute("viewBox", box.map(v => v.toFixed(0)).join(" "));
+  applyScale(box[2]);
   PIECES.forEach(p => g[p.id].classList.toggle("hidden", !inStage(p.id)));
   svg.querySelectorAll(".plabel").forEach(t => {
     const id = t.getAttribute("class").split("lb-")[1];
@@ -454,14 +519,27 @@ function applyStage() {
     const id = t.getAttribute("class").split("gh-")[1];
     t.style.display = inStage(id) ? "" : "none";
   });
-  $("#s1").setAttribute("aria-pressed", stage === 1);
-  $("#s2").setAttribute("aria-pressed", stage === 2);
+  [...$("#stageBtns").children].forEach((b, i) =>
+    b.setAttribute("aria-pressed", i === stage));
 }
+
+function buildStageButtons() {
+  STAGES.forEach((s, i) => {
+    const b = el2("button", "b", s.label);
+    b.setAttribute("aria-pressed", i === 0);
+    b.onclick = () => { stage = i; applyStage(); reset(); };
+    $("#stageBtns").appendChild(b);
+  });
+}
+const el2 = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  n.className = cls; n.textContent = text; return n;
+};
 
 function reset() {
   select(null);
   PIECES.forEach(p => {
-    const anchored = p.id === ANCHOR && !TUNE;
+    const anchored = p.id === S().anchor && !TUNE;
     st[p.id] = {locked:anchored};
     const at = anchored ? TARGET[p.id] : p.present;
     setPiece(p.id, at.x, at.y, at.rot);
@@ -470,20 +548,15 @@ function reset() {
   score();
 }
 
-function total() { return (stage === 1 ? STAGE1.length : PIECES.length) - 1; }
+function total() { return stagePieces().length - 1; }
 function done() {
-  return PIECES.filter(p => inStage(p.id) && p.id !== ANCHOR && st[p.id].locked).length;
+  return stagePieces().filter(id => id !== S().anchor && st[id].locked).length;
 }
 function score() {
   const d = done(), t = total();
   $("#score").textContent = `맞춘 대륙 ${d} / ${t}`;
-  $("#hint").textContent = mode !== "puzzle" ? ""
-    : stage === 1
-      ? "아프리카는 고정되어 있습니다. 남아메리카를 끌어다 대서양을 닫아보세요. 조각을 누른 뒤 위쪽 손잡이를 돌리면 회전합니다."
-      : "아프리카를 기준으로 나머지 여섯 대륙을 맞춰보세요. 남극은 지도 도법 때문에 다른 대륙보다 모양이 다르게 보입니다.";
-  if (d === t && t > 0 && mode === "puzzle") {
-    toast(stage === 1 ? "대서양이 닫혔습니다! 2단계로 가볼까요?" : "판게아 완성! 증거를 겹쳐보세요.");
-  }
+  $("#hint").textContent = mode === "puzzle" ? S().hint : "";
+  if (d === t && t > 0 && mode === "puzzle") toast(S().done);
 }
 
 /* 250 -> "약 2억 5000만 년 전" */
@@ -593,8 +666,6 @@ function nudge(d) {
 }
 
 /* ---------------- 단계 / 모드 ---------------- */
-$("#s1").onclick = () => { stage = 1; applyStage(); reset(); };
-$("#s2").onclick = () => { stage = 2; applyStage(); reset(); };
 $("#reset").onclick = reset;
 
 function setMode(m) {
@@ -992,10 +1063,17 @@ function selftest() {
   ok("거리가 멀면 스냅 안 함", !isSnapped({x:100, y:100, rot:0}, {x:180, y:100, rot:0}));
   ok("각도가 크게 틀리면 스냅 안 함", !isSnapped({x:100, y:100, rot:40}, {x:100, y:100, rot:0}));
   ok("조각 7개", PIECES.length === 7);
+  ok("모든 단계의 기준 대륙에 목표 위치가 있다",
+     STAGES.every(s => TARGET[s.anchor]));
+  ok("모든 단계의 대륙·기준이 실재한다",
+     STAGES.every(s => byId[s.anchor] &&
+       (s.pieces || []).every(id => byId[id]) &&
+       (!s.pieces || s.pieces.includes(s.anchor))));
+  ok("모든 단계에 움직일 대륙이 최소 하나 있다",
+     STAGES.every(s => (s.pieces ? s.pieces.length : PIECES.length) >= 2));
   ok("모든 조각에 목표 위치가 있다", PIECES.every(p => TARGET[p.id]));
   ok("모든 조각에 path/present 가 있다",
      PIECES.every(p => p.d && p.d.length > 50 && p.present && p.proj));
-  ok("기준 대륙이 조각 목록에 있다", !!TARGET[ANCHOR] && !!byId[ANCHOR]);
   ok("화석/빙하가 존재하는 조각만 가리킨다",
      FOSSILS.every(([, , sp]) => sp.every(([id]) => byId[id])) &&
      GLACIERS.every(([id]) => byId[id]));
@@ -1012,6 +1090,7 @@ function selftest() {
 /* ---------------- 시작 ---------------- */
 buildGrid();
 buildPieces();
+buildStageButtons();
 buildMantle();
 initMantleParticles();
 prefillSeafloor();
