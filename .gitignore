@@ -1,0 +1,7 @@
+.DS_Store
+
+# Natural Earth 원본 다운로드 캐시. build_shapes.py 가 없으면 다시 받는다.
+.ne110.geojson
+
+# 이 컴퓨터에만 해당하는 경로가 들어 있다
+.claude/settings.local.json
