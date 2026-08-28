@@ -9,3 +9,6 @@
 # 파이썬 캐시
 __pycache__/
 *.pyc
+
+# 판 경계 원본 다운로드 캐시 (10MB). build_shapes.py 가 없으면 다시 받는다.
+.pb2002_steps.json

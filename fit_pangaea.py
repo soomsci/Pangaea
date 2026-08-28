@@ -255,6 +255,67 @@ def to_local(pts, x, y, rot):
     return np.column_stack([q[:, 0]*c - q[:, 1]*s, q[:, 0]*s + q[:, 1]*c])
 
 
+# ---- 갈라지는 틈에 생기는 해령(발산 경계) ------------------------------
+# 대륙이 갈라지면 그 사이에서 새 해양 지각이 만들어진다. 판게아에서 맞닿아
+# 있던 지점 쌍을 뽑아 두면 두 점의 중간을 이어 해령을 그릴 수 있다. 해령은
+# 양쪽으로 대칭으로 벌어지므로 벌어진 틈의 한가운데가 맞다.
+#
+# 오늘날의 판 경계를 판게아에 그리면 틀린다. 판 경계는 대륙에 붙어 있는 것이
+# 아니라 생겼다 사라진다. 여기서 만드는 것은 판게아가 갈라지며 새로 생긴
+# 발산 경계뿐이고, 오늘날의 판 경계는 애니메이션 끝에서 실제 데이터로 겹친다.
+RIFT_PAIRS = [
+    ("sa", "af"),   # 남대서양
+    ("na", "af"),   # 중앙대서양
+    ("na", "eu"),   # 북대서양
+    ("af", "an"),   # 인도양 서쪽
+    ("af", "in"),   # 아프리카 동해안 - 인도
+    ("an", "oc"),   # 남극 - 오스트레일리아
+]
+
+
+def ridge_pairs(pa, pb, thresh=45.0, n=9):
+    """맞닿은 구간을 따라 고르게 퍼진 지점 쌍을 뽑는다.
+
+    맞닿은 점들을 그냥 이으면 선이 톱니처럼 튄다. 접촉면이 가장 길게 뻗은
+    방향(가장 먼 두 중점을 잇는 축)으로 투영해 구간을 나누고, 구간마다 가장
+    잘 맞닿은 쌍 하나씩만 골라 순서대로 잇는다."""
+    A = xform(GEO[pa]["pts"], *TARGETS[pa])
+    B = xform(GEO[pb]["pts"], *TARGETS[pb])
+    D = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
+    j = D.argmin(1)
+    gap = D[np.arange(len(A)), j]
+    idx = np.where(gap < thresh)[0]
+    if len(idx) < 4:
+        return None
+
+    # 중점이 어느 한쪽 대륙 안이면 선이 육지를 가로지른다. 버린다.
+    mid = (A[idx] + B[j[idx]]) / 2
+    inside = (point_in(mid, [xform(r, *TARGETS[pa]) for r in GEO[pa]["rings"]]) |
+              point_in(mid, [xform(r, *TARGETS[pb]) for r in GEO[pb]["rings"]]))
+    idx, mid = idx[~inside], mid[~inside]
+    if len(idx) < 4:
+        return None
+
+    # 가장 멀리 떨어진 두 중점을 잇는 축 = 접촉면이 뻗은 방향
+    M = np.linalg.norm(mid[:, None, :] - mid[None, :, :], axis=2)
+    p, q = np.unravel_index(M.argmax(), M.shape)
+    axis = mid[q] - mid[p]
+    span = np.linalg.norm(axis)
+    if span < 60:                      # 접촉면이 점에 가까우면 해령을 그릴 게 없다
+        return None
+    t = (mid - mid[p]) @ (axis / span) / span      # 0~1
+
+    pick = []
+    for k in range(n):                 # 구간마다 가장 잘 맞닿은 쌍 하나씩
+        sel = np.where((t >= k / n) & (t < (k + 1) / n + (1e-9 if k == n-1 else 0)))[0]
+        if len(sel):
+            pick.append(idx[sel[np.argmin(gap[idx[sel]])]])
+    if len(pick) < 3:
+        return None
+    return ([GEO[pa]["pts"][i] for i in pick],
+            [GEO[pb]["pts"][j[i]] for i in pick])
+
+
 def split_bands():
     """판게아 위의 띠를 대륙별 조각으로 자른다."""
     out = []
@@ -295,6 +356,29 @@ for pid, init, against, *rest in SPEC:
     print("%s: 출발 (%.0f,%.0f,%.0f) -> 밀착 (%.0f,%.0f,%.1f)   맞닿는 면 평균 틈 %.2fpx"
           % (pid, *init, *fitted, raw), file=sys.stderr)
 
+ridges = []
+for pa, pb in RIFT_PAIRS:
+    r = ridge_pairs(pa, pb)
+    if r is None:
+        print("  경고: %s-%s 접촉면이 해령을 그릴 만큼 뻗어 있지 않다"
+              % (pa, pb), file=sys.stderr)
+        continue
+    ridges.append((pa, pb, r[0], r[1]))
+for pa, pb, la, lb in ridges:
+    a = xform(np.array(la), *TARGETS[pa])
+    b = xform(np.array(lb), *TARGETS[pb])
+    gap = np.linalg.norm(a - b, axis=1)
+    mid = (a + b) / 2
+    span = float(np.linalg.norm(np.diff(mid, axis=0), axis=1).sum())
+    print("해령 %s-%s: 점 %d개, 판게아에서의 틈 %.0f~%.0fpx, 길이 %.0fpx"
+          % (pa, pb, len(la), gap.min(), gap.max(), span), file=sys.stderr)
+
+ridge_block = "const RIDGES = [\n" + "".join(
+    '  {a:"%s", b:"%s", pa:[%s], pb:[%s]},\n'
+    % (pa, pb, ",".join("[%g,%g]" % (p[0], p[1]) for p in la),
+       ",".join("[%g,%g]" % (p[0], p[1]) for p in lb))
+    for pa, pb, la, lb in ridges) + "];"
+
 bands = split_bands()
 fossil_block = "const FOSSILS = [\n" + "".join(
     '  {name:"%s", color:"%s", w:%d, parts:[\n%s  ]},\n'
@@ -313,7 +397,8 @@ block = "const TARGET = {\n" + "".join(
 
 html = open("index.html").read()
 for pat, new_block, what in ((r"const TARGET = \{.*?\n\};", block, "TARGET"),
-                             (r"const FOSSILS = \[.*?\n\];", fossil_block, "FOSSILS")):
+                             (r"const FOSSILS = \[.*?\n\];", fossil_block, "FOSSILS"),
+                             (r"const RIDGES = \[.*?\n\];", ridge_block, "RIDGES")):
     html, n = re.subn(pat, lambda m: new_block, html, count=1, flags=re.S)
     if n == 0:
         sys.exit("index.html 에서 %s 블록을 찾지 못했습니다" % what)

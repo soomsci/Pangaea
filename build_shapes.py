@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
-"""1회용: Natural Earth 110m 국가 경계 -> 판게아 퍼즐용 대륙 조각 SVG path.
+"""1회용: 외부 지리 데이터 -> 시뮬레이션이 쓰는 JS 좌표.
+
+1) Natural Earth 110m 국가 경계 -> 판게아 퍼즐용 대륙 조각 SVG path (표준출력)
+2) PB2002(Bird 2003) -> 오늘날의 판 경계. index.html 의 PLATES 블록에 직접 써 넣는다.
 
 실행: python3 build_shapes.py > shapes.js
-결과를 index.html 안의 PIECES 자리에 붙여넣는다.
 """
-import json, math, os, sys, urllib.request
+import json, math, os, re, sys, urllib.request
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 URL = ("https://raw.githubusercontent.com/nvkelso/natural-earth-vector/"
        "master/geojson/ne_110m_admin_0_countries.geojson")
-CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ne110.geojson")
+CACHE = os.path.join(HERE, ".ne110.geojson")
+
+# 오늘날의 판 경계. Bird(2003) PB2002. 각 구간에 경계 유형이 들어 있다.
+PLATES_URL = ("https://raw.githubusercontent.com/fraxen/tectonicplates/"
+              "master/GeoJSON/PB2002_steps.json")
+PLATES_CACHE = os.path.join(HERE, ".pb2002_steps.json")
+
+# Bird 의 구간 분류를 중학교에서 쓰는 세 가지로 묶는다.
+#   OSR 해령, CRB 대륙 열곡 / SUB 섭입대, OCB·CCB 충돌 / OTF·CTF 변환 단층
+STEP_KIND = {"OSR":"발산", "CRB":"발산", "SUB":"수렴", "OCB":"수렴", "CCB":"수렴",
+             "OTF":"보존", "CTF":"보존"}
+PLATE_TOL = 0.7        # 판 경계 단순화 허용 오차(도)
 
 SCALE = 3.2          # 경도 1도 = 3.2px  -> 세계 지도 1152 x 576
 TOLERANCE = 0.30     # Douglas-Peucker 허용 오차 (도)
@@ -39,11 +53,11 @@ PIECES = [
 ]
 
 
-def fetch():
-    if not os.path.exists(CACHE):
-        print("다운로드 중...", file=sys.stderr)
-        urllib.request.urlretrieve(URL, CACHE)
-    with open(CACHE) as f:
+def fetch(url=URL, cache=CACHE):
+    if not os.path.exists(cache):
+        print("다운로드 중: %s" % os.path.basename(cache), file=sys.stderr)
+        urllib.request.urlretrieve(url, cache)
+    with open(cache) as f:
         return json.load(f)
 
 
@@ -181,6 +195,77 @@ def build():
     return out
 
 
+def build_plates():
+    """PB2002 구간 -> 유형별 폴리라인. 화면 좌표(정거원통도법)로 투영해 둔다."""
+    data = fetch(PLATES_URL, PLATES_CACHE)
+    # (경계 이름, 유형)별로 순번대로 모은다
+    groups = {}
+    for f in data["features"]:
+        p = f["properties"]
+        kind = STEP_KIND.get(p["STEPCLASS"])
+        if kind is None:
+            continue
+        groups.setdefault((p["PLATEBOUND"], kind), []).append(
+            (p["SEQNUM"], f["geometry"]["coordinates"]))
+
+    out = {k: [] for k in ("발산", "수렴", "보존")}
+    for (_, kind), steps in groups.items():
+        steps.sort(key=lambda s: s[0])
+        chain = []
+        for _, coords in steps:
+            pts = [(c[0], c[1]) for c in coords]
+            # 이어지지 않으면 끊는다. 날짜변경선을 넘는 구간도 여기서 끊긴다.
+            if chain and math.dist(chain[-1], pts[0]) > 3.0:
+                if len(chain) > 2:
+                    out[kind].append(simplify_open(chain))
+                chain = []
+            chain.extend(pts if not chain else pts[1:])
+        if len(chain) > 2:
+            out[kind].append(simplify_open(chain))
+
+    lines = {k: [] for k in out}
+    for kind, chains in out.items():
+        for ch in chains:
+            seg = []
+            for lon, lat in ch:
+                if seg and abs(lon - seg[-1][0]) > 180:   # 날짜변경선
+                    if len(seg) > 1:
+                        lines[kind].append(seg)
+                    seg = []
+                seg.append((lon, lat))
+            if len(seg) > 1:
+                lines[kind].append(seg)
+    return lines
+
+
+def simplify_open(pts):
+    """열린 선분 단순화. 링이 아니므로 _dp 를 그대로 쓴다."""
+    return _dp(pts, PLATE_TOL)
+
+
+def write_plates(lines):
+    """index.html 의 PLATES 블록을 갈아 끼운다."""
+    body = []
+    for kind in ("발산", "수렴", "보존"):
+        segs = ",".join(
+            "[" + ",".join("%.0f,%.0f" % ((lon + 180) * SCALE, (90 - lat) * SCALE)
+                           for lon, lat in seg) + "]"
+            for seg in lines[kind])
+        body.append('  {kind:"%s", lines:[%s]},\n' % (kind, segs))
+    block = "const PLATES = [\n" + "".join(body) + "];"
+    path = os.path.join(HERE, "index.html")
+    html = open(path).read()
+    html, n = re.subn(r"const PLATES = \[.*?\n\];", lambda m: block, html,
+                      count=1, flags=re.S)
+    if n == 0:
+        sys.exit("index.html 에서 PLATES 블록을 찾지 못했습니다")
+    open(path, "w").write(html)
+    for kind in lines:
+        print("판 경계 %s: 선 %d개, 점 %d개"
+              % (kind, len(lines[kind]), sum(len(s) for s in lines[kind])),
+              file=sys.stderr)
+
+
 if __name__ == "__main__":
     pieces = build()
     print(f"// build_shapes.py 생성. Natural Earth 110m, scale={SCALE}, "
@@ -195,3 +280,4 @@ if __name__ == "__main__":
     print("];")
     total = sum(len(p["d"]) for p in pieces)
     print(f"// path 총 {total:,}자", file=sys.stderr)
+    write_plates(build_plates())
