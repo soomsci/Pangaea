@@ -20,6 +20,7 @@
 import math, re, sys
 import numpy as np
 
+SCALE  = 3.2                 # build_shapes.py 와 같아야 한다
 AF_POS = (566.0, 286.0)      # 아프리카를 화면 어디에 고정할지
 
 # 맞물림을 재는 외곽선 점의 개수. 비율(예: 25%)로 잡으면 안 된다 —
@@ -66,7 +67,10 @@ for blk in open("shapes.js").read().split('{ id:"')[1:]:
     d = re.search(r'd:"([^"]+)"', blk).group(1)
     rings = [np.array([[float(v) for v in pt.split(",")] for pt in sub.split("L")])
              for sub in d.lstrip("M").rstrip("Z").split("ZM")]
-    GEO[pid] = {"rings": rings, "pts": np.vstack(rings)}
+    GEO[pid] = {"rings": rings, "pts": np.vstack(rings),
+                "cx": float(re.search(r"cx:(-?[\d.]+)", blk).group(1)),
+                "cy": float(re.search(r"cy:(-?[\d.]+)", blk).group(1)),
+                "proj": re.search(r'proj:"(\w+)"', blk).group(1)}
 
 
 def xform(pts, x, y, rot):
@@ -75,6 +79,15 @@ def xform(pts, x, y, rot):
     c, s = math.cos(t), math.sin(t)
     return np.column_stack([x + pts[:, 0]*c - pts[:, 1]*s,
                             y + pts[:, 0]*s + pts[:, 1]*c])
+
+
+def local(pid, lon, lat):
+    """경위도 -> 조각 로컬 좌표. build_shapes.py 의 project 와 같은 식이어야 한다."""
+    g = GEO[pid]
+    if g["proj"] == "spole":
+        r, a = (90 + lat) * SCALE, math.radians(lon)
+        return r * math.sin(a) - g["cx"], r * math.cos(a) - g["cy"]
+    return lon * SCALE - g["cx"], -lat * SCALE - g["cy"]
 
 
 def point_in(pts, rings):
@@ -153,6 +166,124 @@ def hug(pid, init, against, max_over=MAX_OVER, span=(17, 17, 8)):
     return (bx, by, br), raw
 
 
+
+# ---- 화석 띠 --------------------------------------------------------------
+# 같은 화석이 여러 대륙에서 나온다는 증거는 점 몇 개로는 "이어진다"가 읽히지 않는다.
+# 그래서 띠를 판게아 위에 하나로 그린 뒤 대륙별로 잘라 각 조각의 로컬 좌표로 저장한다.
+# 학생이 판게아를 맞추면 잘렸던 띠가 제자리에서 다시 이어진다.
+#
+# 좌표는 (대륙, 경도, 위도). 실제 화석 산지를 하나하나 옮긴 것이 아니라
+# 그 화석이 나오는 지역을 지나가도록 잡은 개략 경로다.
+BANDS = [
+    ("메소사우루스", "#8a3fa8", 9, [
+        # 민물 파충류. 남대서양 양쪽 좁은 띠 하나로만 나온다.
+        [("sa", -58, -33), ("sa", -48, -25), ("sa", -42, -20),
+         ("af", 12, -13), ("af", 18, -22), ("af", 24, -31)],
+    ]),
+    ("키노그나투스", "#1f7a5a", 9, [
+        # 육상 파충류. 남아메리카 중부와 아프리카 남부.
+        [("sa", -67, -36), ("sa", -57, -31), ("sa", -47, -27),
+         ("af", 17, -28), ("af", 27, -21), ("af", 36, -13)],
+    ]),
+    ("리스트로사우루스", "#c2621d", 9, [
+        # 육상 파충류. 아프리카 남부에서 인도로, 그리고 남극으로.
+        [("af", 30, -27), ("af", 38, -14), ("af", 46, -3), ("in", 72, 16), ("in", 82, 23)],
+        [("af", 26, -32), ("an", -10, -72), ("an", 15, -71), ("an", 40, -70), ("an", 60, -69)],
+    ]),
+    ("글로소프테리스", "#2f6d8c", 11, [
+        # 양치식물. 남반구 다섯 대륙 전부에서 나온다. 가장 넓은 증거.
+        [("sa", -60, -39), ("sa", -50, -31), ("af", 15, -33), ("af", 30, -26),
+         ("af", 44, -6), ("in", 74, 15), ("in", 84, 21)],
+        [("af", 20, -34), ("an", -20, -74), ("an", 10, -75), ("an", 45, -73),
+         ("an", 80, -70), ("an", 105, -68), ("oc", 118, -31), ("oc", 134, -33),
+         ("oc", 148, -29)],
+    ]),
+]
+
+
+HOPS = []
+
+
+def contact(pa, pb, near, radius=170.0):
+    """두 대륙 외곽선에서 near 근처의 가장 가까운 점 쌍(= 맞닿는 지점).
+
+    띠가 대륙을 건너갈 때 이 지점으로 지나가게 하면, 손으로 좌표를 맞추지
+    않아도 양쪽 조각이 이음매에서 정확히 만난다."""
+    A = xform(GEO[pa]["pts"], *TARGETS[pa])
+    B = xform(GEO[pb]["pts"], *TARGETS[pb])
+    A = A[np.linalg.norm(A - near, axis=1) < radius]
+    B = B[np.linalg.norm(B - near, axis=1) < radius]
+    if not len(A) or not len(B):
+        return None
+    D = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
+    i, j = np.unravel_index(D.argmin(), D.shape)
+    return A[i], B[j]
+
+
+def chain_world(chain, step=1.5):
+    """(대륙, 경도, 위도) 목록 -> 판게아 화면 좌표의 촘촘한 점열.
+
+    같은 대륙 안의 구간은 경위도에서 보간한 뒤 투영한다. 화면 좌표에서 곧장
+    직선을 그으면 남극처럼 극 중심 도법을 쓰는 대륙에서 띠가 헤어핀으로 꺾인다.
+    대륙이 바뀌는 구간만 화면 좌표에서 직선으로 잇는다."""
+    out = []
+    for (p1, lo1, la1), (p2, lo2, la2) in zip(chain[:-1], chain[1:]):
+        if p1 == p2:
+            n = max(2, int(math.dist((lo1, la1), (lo2, la2)) * SCALE / step))
+            pts = [local(p1, lo1 + (lo2-lo1)*i/n, la1 + (la2-la1)*i/n) for i in range(n)]
+            out.extend(xform(np.array(pts), *TARGETS[p1]))
+        else:
+            a = xform(np.array([local(p1, lo1, la1)]), *TARGETS[p1])[0]
+            b = xform(np.array([local(p2, lo2, la2)]), *TARGETS[p2])[0]
+            # 두 대륙이 실제로 맞닿는 지점을 거쳐 가도록 경로를 꺾는다
+            via = contact(p1, p2, (a + b) / 2)
+            legs = [(a, via[0]), (via[0], via[1]), (via[1], b)] if via else [(a, b)]
+            HOPS.append((p1, p2, math.dist(*legs[1]) if via else math.dist(a, b)))
+            for u, v in legs:
+                n = max(2, int(math.dist(u, v) / step))
+                out.extend(u + (v - u) * i / n for i in range(n))
+    pid, lo, la = chain[-1]
+    out.append(xform(np.array([local(pid, lo, la)]), *TARGETS[pid])[0])
+    return np.array(out)
+
+
+def to_local(pts, x, y, rot):
+    """xform 의 역변환. 판게아 화면 좌표 -> 조각 로컬 좌표."""
+    t = math.radians(-rot)
+    c, s = math.cos(t), math.sin(t)
+    q = pts - np.array([x, y])
+    return np.column_stack([q[:, 0]*c - q[:, 1]*s, q[:, 0]*s + q[:, 1]*c])
+
+
+def split_bands():
+    """판게아 위의 띠를 대륙별 조각으로 자른다."""
+    out = []
+    for name, color, width, chains in BANDS:
+        parts = []
+        HOPS.clear()
+        for chain in chains:
+            world = chain_world(chain)
+            for pid in GEO:
+                rings = [xform(r, *TARGETS[pid]) for r in GEO[pid]["rings"]]
+                inside = point_in(world, rings)
+                run = []
+                for i, ins in enumerate(list(inside) + [False]):
+                    if ins:
+                        run.append(i)
+                    elif run:
+                        if len(run) >= 3:       # 스쳐 지나간 자투리는 버린다
+                            seg = to_local(world[run], *TARGETS[pid])
+                            seg = seg[::max(1, len(seg)//14)]   # 점 수를 줄인다
+                            parts.append((pid, np.round(seg, 1)))
+                        run = []
+        far = [h for h in HOPS if h[2] > 14]
+        if far:
+            print("  경고 %s: 대륙 사이를 %s 건너뜀 — 띠가 끊겨 보인다"
+                  % (name, ", ".join("%s->%s %.0fpx" % h for h in far)), file=sys.stderr)
+        out.append((name, color, width, parts))
+    return out
+
+
 TARGETS = {"af": (AF_POS[0], AF_POS[1], 0.0)}
 for pid, init, against, *rest in SPEC:
     init = tuple(float(v) for v in init)
@@ -161,14 +292,27 @@ for pid, init, against, *rest in SPEC:
     print("%s: 출발 (%.0f,%.0f,%.0f) -> 밀착 (%.0f,%.0f,%.1f)   맞닿는 면 평균 틈 %.2fpx"
           % (pid, *init, *fitted, raw), file=sys.stderr)
 
+bands = split_bands()
+fossil_block = "const FOSSILS = [\n" + "".join(
+    '  {name:"%s", color:"%s", w:%d, parts:[\n%s  ]},\n'
+    % (name, color, width, "".join(
+        '    ["%s",[%s]],\n' % (pid, ",".join("[%g,%g]" % tuple(p) for p in seg))
+        for pid, seg in parts))
+    for name, color, width, parts in bands) + "];"
+for name, _, _, parts in bands:
+    print("%s: %d개 대륙에 걸쳐 %d조각"
+          % (name, len({p for p, _ in parts}), len(parts)), file=sys.stderr)
+
 order = ["af", "sa", "na", "eu", "in", "oc", "an"]
 block = "const TARGET = {\n" + "".join(
     "  %s: {x:%d, y:%d, rot:%.1f},\n" % (p, round(TARGETS[p][0]), round(TARGETS[p][1]),
                                         TARGETS[p][2]) for p in order) + "};"
 
 html = open("index.html").read()
-new, n = re.subn(r"const TARGET = \{.*?\n\};", lambda m: block, html, count=1, flags=re.S)
-if n == 0:
-    sys.exit("index.html 에서 TARGET 블록을 찾지 못했습니다")
-open("index.html", "w").write(new)
+for pat, new_block, what in ((r"const TARGET = \{.*?\n\};", block, "TARGET"),
+                             (r"const FOSSILS = \[.*?\n\];", fossil_block, "FOSSILS")):
+    html, n = re.subn(pat, lambda m: new_block, html, count=1, flags=re.S)
+    if n == 0:
+        sys.exit("index.html 에서 %s 블록을 찾지 못했습니다" % what)
+open("index.html", "w").write(html)
 print(block)
