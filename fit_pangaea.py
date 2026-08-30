@@ -43,7 +43,10 @@ DRIFT_R   = 0.13   # 출발 각도에서 1도 벗어날 때의 벌점
 SPEC = [
     # 브라질 동해안이 기니만에 들어간다. 적도 부근이라 도법 왜곡이 가장 작고
     # 그래서 이 정합이 제일 잘 맞는다. 수업의 핵심 장면.
-    ("sa", (492, 362, -44), ["af"]),
+    # 수업의 대표 장면이라 다른 대륙보다 공들여 맞춘다. 탐색을 넓히고 출발
+    # 위치에 매어 두는 힘을 줄이며, 맞물림을 재는 점을 늘려 더 긴 구간이
+    # 맞닿도록 한다.
+    ("sa", (492, 362, -44), ["af"], MAX_OVER, (26, 26, 14), (0.02, 0.05), 70),
     # 동해안(플로리다~뉴펀들랜드)이 아프리카 북서안에 붙는다.
     ("na", (409, 123, 14), ["af"]),
     # 이베리아반도가 모로코 위에 얹히고 북아메리카와도 이어진다.
@@ -140,13 +143,14 @@ def gap_cost(sdf, pts, k, max_over):
     return gap + OVER_W * max(0.0, deepest - SLACK)
 
 
-def hug(pid, init, against, max_over=MAX_OVER, span=(17, 17, 8)):
+def hug(pid, init, against, max_over=MAX_OVER, span=(17, 17, 8),
+        drift=(DRIFT_XY, DRIFT_R), contact_n=CONTACT_N):
     """출발 위치 근처에서만, 이미 배치된 대륙들에 촘촘히 붙인다."""
     outline = np.vstack([xform(GEO[a]["pts"], *TARGETS[a]) for a in against])
     rings = [xform(r, *TARGETS[a]) for a in against for r in GEO[a]["rings"]]
     sdf = SDF(outline, rings)
     pts = GEO[pid]["pts"]
-    k = min(CONTACT_N, max(12, len(pts) // 4))
+    k = min(contact_n, max(12, len(pts) // 4))
 
     best, bx, by, br = float("inf"), *init
     for step, rstep in ((3.0, 1.5), (1.0, 0.5), (0.4, 0.2)):   # 성긴 -> 촘촘한
@@ -157,8 +161,8 @@ def hug(pid, init, against, max_over=MAX_OVER, span=(17, 17, 8)):
             for dx in np.arange(cx - rx, cx + rx + 1e-9, step):
                 for dy in np.arange(cy - ry, cy + ry + 1e-9, step):
                     c = (gap_cost(sdf, base + (dx, dy), k, max_over)
-                         + DRIFT_XY * math.hypot(dx - init[0], dy - init[1])
-                         + DRIFT_R * abs(rot - init[2]))
+                         + drift[0] * math.hypot(dx - init[0], dy - init[1])
+                         + drift[1] * abs(rot - init[2]))
                     if c < best:
                         best, bx, by, br = c, dx, dy, rot
     # 보고용으로는 벌점을 뺀 실제 틈을 다시 잰다
@@ -218,6 +222,24 @@ def contact(pa, pb, near, radius=170.0):
     D = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
     i, j = np.unravel_index(D.argmin(), D.shape)
     return A[i], B[j]
+
+
+# ---- 고생대 조산대 --------------------------------------------------------
+# 갈라진 대륙 양쪽에서 같은 시기·같은 구조의 산맥이 이어진다. 화석 띠와 같은
+# 방식으로 판게아 위에 그린 뒤 대륙별로 자른다.
+BELTS = [
+    ("고생대 조산대", "#6b4423", 13, [
+        # 애팔래치아 - 칼레도니아. 대륙이동설의 대표 증거.
+        # 북서아프리카(모리타니데스) - 애팔래치아 - 아일랜드/스코틀랜드 - 스칸디나비아
+        [("af", -10, 21), ("af", -8, 29),
+         ("na", -85, 33), ("na", -79, 38), ("na", -71, 43), ("na", -59, 47),
+         ("eu", -8, 54), ("eu", 1, 58), ("eu", 11, 64), ("eu", 18, 69)],
+        # 동그린란드 칼레도니아
+        [("na", -44, 61), ("na", -33, 69), ("na", -26, 75)],
+        # 케이프 습곡대(남아프리카) - 시에라 데 라 벤타나(아르헨티나)
+        [("sa", -63, -38), ("sa", -58, -37), ("af", 19, -34), ("af", 27, -33)],
+    ]),
+]
 
 
 def chain_world(chain, step=1.5):
@@ -316,10 +338,10 @@ def ridge_pairs(pa, pb, thresh=45.0, n=9):
             [GEO[pb]["pts"][j[i]] for i in pick])
 
 
-def split_bands():
+def split_bands(table):
     """판게아 위의 띠를 대륙별 조각으로 자른다."""
     out = []
-    for name, color, width, chains in BANDS:
+    for name, color, width, chains in table:
         parts = []
         HOPS.clear()
         for chain in chains:
@@ -351,7 +373,7 @@ def split_bands():
 TARGETS = {"af": (AF_POS[0], AF_POS[1], 0.0)}
 for pid, init, against, *rest in SPEC:
     init = tuple(float(v) for v in init)
-    fitted, raw = hug(pid, init, against, rest[0] if rest else MAX_OVER)
+    fitted, raw = hug(pid, init, against, *rest)
     TARGETS[pid] = fitted
     print("%s: 출발 (%.0f,%.0f,%.0f) -> 밀착 (%.0f,%.0f,%.1f)   맞닿는 면 평균 틈 %.2fpx"
           % (pid, *init, *fitted, raw), file=sys.stderr)
@@ -379,14 +401,24 @@ ridge_block = "const RIDGES = [\n" + "".join(
        ",".join("[%g,%g]" % (p[0], p[1]) for p in lb))
     for pa, pb, la, lb in ridges) + "];"
 
-bands = split_bands()
+bands = split_bands(BANDS)
+belts = split_bands(BELTS)
 fossil_block = "const FOSSILS = [\n" + "".join(
     '  {name:"%s", color:"%s", w:%d, parts:[\n%s  ]},\n'
     % (name, color, width, "".join(
         '    ["%s",[%s]],\n' % (pid, ",".join("[%g,%g]" % tuple(p) for p in seg))
         for pid, seg in parts))
     for name, color, width, parts in bands) + "];"
-for name, _, _, parts in bands:
+def emit(table, var):
+    return "const %s = [\n" % var + "".join(
+        '  {name:"%s", color:"%s", w:%d, parts:[\n%s  ]},\n'
+        % (name, color, width, "".join(
+            '    ["%s",[%s]],\n' % (pid, ",".join("[%g,%g]" % tuple(p) for p in seg))
+            for pid, seg in parts))
+        for name, color, width, parts in table) + "];"
+
+belt_block = emit(belts, "BELTS")
+for name, _, _, parts in bands + belts:
     print("%s: %d개 대륙에 걸쳐 %d조각"
           % (name, len({p for p, _ in parts}), len(parts)), file=sys.stderr)
 
@@ -398,7 +430,8 @@ block = "const TARGET = {\n" + "".join(
 html = open("index.html").read()
 for pat, new_block, what in ((r"const TARGET = \{.*?\n\};", block, "TARGET"),
                              (r"const FOSSILS = \[.*?\n\];", fossil_block, "FOSSILS"),
-                             (r"const RIDGES = \[.*?\n\];", ridge_block, "RIDGES")):
+                             (r"const RIDGES = \[.*?\n\];", ridge_block, "RIDGES"),
+                             (r"const BELTS = \[.*?\n\];", belt_block, "BELTS")):
     html, n = re.subn(pat, lambda m: new_block, html, count=1, flags=re.S)
     if n == 0:
         sys.exit("index.html 에서 %s 블록을 찾지 못했습니다" % what)
