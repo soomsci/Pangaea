@@ -71,6 +71,8 @@ for blk in open("shapes.js").read().split('{ id:"')[1:]:
     rings = [np.array([[float(v) for v in pt.split(",")] for pt in sub.split("L")])
              for sub in d.lstrip("M").rstrip("Z").split("ZM")]
     GEO[pid] = {"rings": rings, "pts": np.vstack(rings),
+                "name": re.search(r'name:"([^"]+)"', blk).group(1),
+                "present": re.search(r"present:\{([^}]+)\}", blk).group(1),
                 "cx": float(re.search(r"cx:(-?[\d.]+)", blk).group(1)),
                 "cy": float(re.search(r"cy:(-?[\d.]+)", blk).group(1)),
                 "proj": re.search(r'proj:"(\w+)"', blk).group(1)}
@@ -222,6 +224,69 @@ def contact(pa, pb, near, radius=170.0):
     D = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
     i, j = np.unravel_index(D.argmin(), D.shape)
     return A[i], B[j]
+
+
+# ---- 해안선 물리기(weld) --------------------------------------------------
+# 실제 해안선을 강체로 맞추면 틈과 겹침이 남는다. 원래 그 사이는 대륙붕이라
+# 해안선끼리는 원래 안 맞는다. 수업에서는 "딱 맞는다"가 보여야 하므로,
+# 맞닿는 구간만 서로에게 조금씩 물려 같은 곡선이 되게 가공한다.
+# 교과서 그림도 이렇게 이상화한 모양을 쓴다.
+#
+# 접촉면에서 먼 곳은 손대지 않으므로 대륙의 생김새는 그대로 남는다.
+WELD_NEAR = 10.0    # px. 이보다 가까우면 온전히 물린다
+WELD_FAR  = 30.0    # px. 여기서 0 으로 잦아든다. 그 밖은 손대지 않는다
+WELD_PASS = 3       # 되풀이 횟수. 한 번에 절반씩 좁혀진다
+WELD_MAX  = 12.0    # px. 한 점이 원래 자리에서 이만큼 넘게는 못 움직인다.
+                    # 상한이 없으면 되풀이할 때마다 상대 해안을 쫓아가 대륙이
+                    # 뭉개진다(60px 넘게 밀린 적 있음).
+
+
+def weld(pairs):
+    """맞닿는 구간의 해안선을 서로에게 물려 같은 곡선으로 만든다."""
+    home = {p: GEO[p]["pts"].copy() for p in GEO}
+    for _ in range(WELD_PASS):
+        moves = {p: np.zeros_like(GEO[p]["pts"]) for p in GEO}
+        for pa, pb in pairs:
+            A = xform(GEO[pa]["pts"], *TARGETS[pa])
+            B = xform(GEO[pb]["pts"], *TARGETS[pb])
+            D = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
+            for src, dst, M, N in ((pa, pb, A, B), (pb, pa, B, A)):
+                d = D.min(1) if src == pa else D.min(0)
+                j = D.argmin(1) if src == pa else D.argmin(0)
+                # 접촉면에서 멀어질수록 잦아드는 가중치
+                w = np.clip((WELD_FAR - d) / (WELD_FAR - WELD_NEAR), 0, 1)
+                delta = (N[j] - M) * 0.5 * w[:, None]
+                # 화면 좌표의 이동량을 조각 로컬 좌표의 이동량으로
+                t = math.radians(-TARGETS[src][2])
+                c, sn = math.cos(t), math.sin(t)
+                moves[src] += np.column_stack([delta[:, 0]*c - delta[:, 1]*sn,
+                                               delta[:, 0]*sn + delta[:, 1]*c])
+        for p in GEO:
+            pts = GEO[p]["pts"] + moves[p]
+            # 원래 자리에서 너무 멀어지지 않게 잡아 둔다
+            off = pts - home[p]
+            dist = np.linalg.norm(off, axis=1, keepdims=True)
+            pts = home[p] + off * np.minimum(1.0, WELD_MAX / np.maximum(dist, 1e-9))
+            GEO[p]["pts"] = pts
+            n = 0                       # 링 단위로도 갱신해 둔다
+            for r in range(len(GEO[p]["rings"])):
+                k = len(GEO[p]["rings"][r])
+                GEO[p]["rings"][r] = GEO[p]["pts"][n:n+k]
+                n += k
+
+
+def write_pieces():
+    """가공한 조각 모양을 index.html 의 PIECES 블록에 다시 써 넣는다."""
+    order = ["na", "sa", "af", "eu", "in", "oc", "an"]
+    body = ""
+    for pid in order:
+        g = GEO[pid]
+        d = "".join("M" + "L".join("%.1f,%.1f" % (x, y) for x, y in r) + "Z"
+                    for r in g["rings"])
+        body += ('  { id:"%s", name:"%s", proj:"%s", cx:%s, cy:%s,\n'
+                 '    present:{%s},\n    d:"%s" },\n'
+                 % (pid, g["name"], g["proj"], g["cx"], g["cy"], g["present"], d))
+    return "const PIECES = [\n" + body + "];"
 
 
 # ---- 고생대 조산대 --------------------------------------------------------
@@ -378,6 +443,16 @@ for pid, init, against, *rest in SPEC:
     print("%s: 출발 (%.0f,%.0f,%.0f) -> 밀착 (%.0f,%.0f,%.1f)   맞닿는 면 평균 틈 %.2fpx"
           % (pid, *init, *fitted, raw), file=sys.stderr)
 
+# 목표 위치를 다 구한 뒤에 물린다. 물리기 전 모양으로 위치를 맞춰야
+# 대륙이 제자리를 찾고, 물린 뒤에 띠·해령을 계산해야 가공된 모양과 맞는다.
+before = {p: GEO[p]["pts"].copy() for p in GEO}
+weld(RIFT_PAIRS)
+for p in GEO:
+    moved = np.linalg.norm(GEO[p]["pts"] - before[p], axis=1)
+    print("%s: 해안선 %d개 점을 옮김(최대 %.1fpx, 평균 %.1fpx)"
+          % (p, int((moved > 0.5).sum()), moved.max(), moved[moved > 0.5].mean()
+             if (moved > 0.5).any() else 0), file=sys.stderr)
+
 ridges = []
 for pa, pb in RIFT_PAIRS:
     r = ridge_pairs(pa, pb)
@@ -431,7 +506,8 @@ html = open("index.html").read()
 for pat, new_block, what in ((r"const TARGET = \{.*?\n\};", block, "TARGET"),
                              (r"const FOSSILS = \[.*?\n\];", fossil_block, "FOSSILS"),
                              (r"const RIDGES = \[.*?\n\];", ridge_block, "RIDGES"),
-                             (r"const BELTS = \[.*?\n\];", belt_block, "BELTS")):
+                             (r"const BELTS = \[.*?\n\];", belt_block, "BELTS"),
+                             (r"const PIECES = \[.*?\n\];", write_pieces(), "PIECES")):
     html, n = re.subn(pat, lambda m: new_block, html, count=1, flags=re.S)
     if n == 0:
         sys.exit("index.html 에서 %s 블록을 찾지 못했습니다" % what)
