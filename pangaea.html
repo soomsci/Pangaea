@@ -53,6 +53,8 @@ main{max-width:1180px;margin:0 auto;padding:20px 22px 48px}
 .panel{display:none}
 .panel.on{display:block}
 
+#bsvg{cursor:grab}
+#bsvg:active{cursor:grabbing}
 svg.stage{display:block;width:100%;height:auto;border-radius:12px;
   border:1px solid var(--line);box-shadow:var(--shadow);touch-action:none;
   user-select:none;-webkit-user-select:none;background:#bcdcef}
@@ -252,6 +254,12 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
   <div class="console"><div class="bar">
     <button class="b" id="bPlay">▶ 재생</button>
     <button class="b" id="bReset">처음부터</button>
+    <span class="sep"></span>
+    <span class="tag">확대</span>
+    <button class="b" id="bZoomOut" aria-label="축소">−</button>
+    <span class="score" id="bZoomLabel" style="min-width:3.2em;text-align:center">1.0×</span>
+    <button class="b" id="bZoomIn" aria-label="확대">＋</button>
+    <button class="b" id="bZoomFit">화면 맞춤</button>
     <span class="sep"></span>
     <input type="range" id="bTime" min="0" max="1000" value="0" aria-label="시간">
     <span class="score" id="bAge">2억 5000만 년 전</span>
@@ -1015,6 +1023,47 @@ const mix = (a, b, t) => {
 
 let B_FRAME = [0, 0, 1200, 600];  // 조각을 만든 뒤 계산한다
 
+/* 사용자 확대·이동. 판게아 초기 모양을 가까이 들여다볼 수 있게 한다.
+   끌어서 옮기고, 휠이나 ＋/− 로 확대한다. */
+const bz = {k:1, dx:0, dy:0};
+const BZ_MIN = 1, BZ_MAX = 8;
+
+function applyBreakView() {
+  const [x, y, w, h] = B_FRAME;
+  const cw = w / bz.k, ch = h / bz.k;
+  // 중심이 화면 틀 밖으로 나가지 않게 잡아 둔다
+  const cx = Math.min(Math.max(x + w/2 + bz.dx, x + cw/2), x + w - cw/2);
+  const cy = Math.min(Math.max(y + h/2 + bz.dy, y + ch/2), y + h - ch/2);
+  bz.dx = cx - (x + w/2);
+  bz.dy = cy - (y + h/2);
+  bsvg.setAttribute("viewBox", [cx - cw/2, cy - ch/2, cw, ch]
+    .map(v => v.toFixed(1)).join(" "));
+  // 확대해도 글자와 선이 화면상 같은 굵기로 보이게 되돌린다
+  const u = cw / 1200;
+  bsvg.querySelectorAll(".blb").forEach(n =>
+    n.setAttribute("font-size", (19 * u).toFixed(1)));
+  ridgeG.forEach(g2 => {
+    g2.children[0].setAttribute("stroke-width", (10 * u).toFixed(1));
+    g2.children[1].setAttribute("stroke-width", (5 * u).toFixed(1));
+  });
+  $("#bZoomLabel").textContent = bz.k.toFixed(1) + "×";
+  $("#bZoomOut").disabled = bz.k <= BZ_MIN + 1e-6;
+  $("#bZoomIn").disabled = bz.k >= BZ_MAX - 1e-6;
+}
+
+/* focus 를 주면 그 지점을 제자리에 둔 채 확대한다(휠 확대). */
+function bzoom(mul, focus) {
+  const k = Math.min(BZ_MAX, Math.max(BZ_MIN, bz.k * mul));
+  if (focus && k !== bz.k) {
+    const [x, y, w, h] = B_FRAME;
+    const cx = x + w/2 + bz.dx, cy = y + h/2 + bz.dy;
+    bz.dx = focus.x + (cx - focus.x) * (bz.k / k) - (x + w/2);
+    bz.dy = focus.y + (cy - focus.y) * (bz.k / k) - (y + h/2);
+  }
+  bz.k = k;
+  applyBreakView();
+}
+
 /* 판게아 배치와 현재 배치를 모두 담는 고정 화면 틀.
    유라시아가 워낙 커서 판게아가 현재 지도보다 오히려 넓다. 그래서 화면을
    움직여 봐야 얻는 게 없고, 고정해 두어야 어느 시점에도 잘리지 않는다. */
@@ -1120,6 +1169,38 @@ function stopBreak() {
   cancelAnimationFrame(bRaf); bRaf = 0;
   $("#bPlay").textContent = +$("#bTime").value >= 995 ? "◀ 되감기" : "▶ 재생";
 }
+$("#bZoomIn").onclick = () => bzoom(1.5);
+$("#bZoomOut").onclick = () => bzoom(1 / 1.5);
+$("#bZoomFit").onclick = () => { bz.k = 1; bz.dx = bz.dy = 0; applyBreakView(); };
+
+const bpt = bsvg.createSVGPoint();
+function bToSvg(e) {
+  bpt.x = e.clientX; bpt.y = e.clientY;
+  return bpt.matrixTransform(bsvg.getScreenCTM().inverse());
+}
+bsvg.addEventListener("wheel", e => {
+  e.preventDefault();
+  bzoom(Math.pow(1.0015, -e.deltaY), bToSvg(e));
+}, {passive:false});
+
+let bdrag = null;
+bsvg.addEventListener("pointerdown", e => {
+  bdrag = {p:bToSvg(e), dx:bz.dx, dy:bz.dy};
+  bsvg.setPointerCapture(e.pointerId);
+});
+bsvg.addEventListener("pointermove", e => {
+  if (!bdrag) return;
+  const m = bToSvg(e);
+  bz.dx = bdrag.dx - (m.x - bdrag.p.x);
+  bz.dy = bdrag.dy - (m.y - bdrag.p.y);
+  applyBreakView();
+});
+for (const ev of ["pointerup", "pointercancel"])
+  bsvg.addEventListener(ev, e => {
+    bdrag = null;
+    try { bsvg.releasePointerCapture(e.pointerId); } catch (_) {}
+  });
+
 $("#bTime").oninput = e => { stopBreak(); setBreak(+e.target.value / 1000); };
 $("#bReset").onclick = () => { stopBreak(); $("#bTime").value = 0; setBreak(0); };
 $("#bPlay").onclick = () => {
@@ -1471,6 +1552,19 @@ function selftest() {
     setBreak(0.75); const b = +ridgeG[0].getAttribute("opacity");
     setBreak(0); return a === 0 && b > 0;
   })());
+  ok("확대하면 화면 틀이 좁아지고, 화면 맞춤으로 되돌아온다", (() => {
+    const before = bsvg.getAttribute("viewBox");
+    bzoom(2); const zoomed = bsvg.getAttribute("viewBox");
+    bz.k = 1; bz.dx = bz.dy = 0; applyBreakView();
+    return +zoomed.split(" ")[2] < +before.split(" ")[2] &&
+           bsvg.getAttribute("viewBox") === before;
+  })());
+  ok("확대 배율이 범위를 벗어나지 않는다", (() => {
+    bzoom(100); const hi = bz.k;
+    bzoom(0.001); const lo = bz.k;
+    bz.k = 1; bz.dx = bz.dy = 0; applyBreakView();
+    return hi === BZ_MAX && lo === BZ_MIN;
+  })());
   ok("갈라짐 화면 틀이 판게아와 현재를 모두 담는다",
      B_FRAME[0] <= 0 && B_FRAME[1] <= 0 &&
      B_FRAME[0] + B_FRAME[2] >= 1200 && B_FRAME[1] + B_FRAME[3] >= 600);
@@ -1493,10 +1587,7 @@ buildPieces();
 buildBreakup();
 buildRidgesAndPlates();
 B_FRAME = breakupFrame();
-bsvg.setAttribute("viewBox", B_FRAME.map(v => v.toFixed(0)).join(" "));
-// 화면 틀이 지도보다 넓으므로 이름표도 그만큼 키워야 크기가 같아 보인다
-bsvg.querySelectorAll(".blb").forEach(n =>
-  n.setAttribute("font-size", (19 * B_FRAME[2] / 1200).toFixed(1)));
+applyBreakView();     // 화면 틀·글자 크기·선 굵기를 한꺼번에 맞춘다
 setBreak(0);
 buildStageButtons();
 FOSSILS.forEach((_, i) => showFx(i));   // 조각을 만든 뒤라야 띠에 적용된다
