@@ -53,8 +53,20 @@ main{max-width:1180px;margin:0 auto;padding:20px 22px 48px}
 .panel{display:none}
 .panel.on{display:block}
 
+.mapwrap{position:relative}
 #bsvg{cursor:grab}
 #bsvg:active{cursor:grabbing}
+.zoomctl{position:absolute;top:14px;right:14px;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 2px 8px rgba(0,0,0,.15);overflow:hidden}
+.zoomctl button{appearance:none;border:none;background:none;width:38px;height:34px;
+  font-size:18px;font-weight:700;color:var(--ink);cursor:pointer;
+  border-bottom:1px solid var(--line)}
+.zoomctl button:last-child{border-bottom:none;font-size:14px}
+.zoomctl button:hover{background:var(--sunk)}
+.zoomctl button:disabled{opacity:.35;cursor:default;background:none}
+.zoomctl #bZoomLabel{font-size:11px;text-align:center;padding:3px 0;color:var(--muted);
+  border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
 svg.stage{display:block;width:100%;height:auto;border-radius:12px;
   border:1px solid var(--line);box-shadow:var(--shadow);touch-action:none;
   user-select:none;-webkit-user-select:none;background:#bcdcef}
@@ -228,6 +240,7 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
 
 <!-- ================= 탭 2: 판게아가 갈라진다 ================= -->
 <section class="panel" id="p-breakup" role="tabpanel" aria-labelledby="tab-breakup">
+  <div class="mapwrap">
   <svg class="stage" id="bsvg" viewBox="0 0 1200 600" role="img"
        aria-label="하나로 붙어 있던 판게아가 갈라져 현재 대륙 배치가 되는 애니메이션">
     <defs>
@@ -251,16 +264,17 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
     <g id="bRidges" pointer-events="none"></g>
     <g id="bLabels" pointer-events="none"></g>
   </svg>
+  <div class="zoomctl">
+    <button id="bZoomIn" aria-label="확대">＋</button>
+    <span id="bZoomLabel">1.0×</span>
+    <button id="bZoomOut" aria-label="축소">−</button>
+    <button id="bZoomFit" aria-label="화면 맞춤" title="화면 맞춤">⤢</button>
+  </div>
+  </div>
 
   <div class="console"><div class="bar">
     <button class="b" id="bPlay">▶ 재생</button>
     <button class="b" id="bReset">처음부터</button>
-    <span class="sep"></span>
-    <span class="tag">확대</span>
-    <button class="b" id="bZoomOut" aria-label="축소">−</button>
-    <span class="score" id="bZoomLabel" style="min-width:3.2em;text-align:center">1.0×</span>
-    <button class="b" id="bZoomIn" aria-label="확대">＋</button>
-    <button class="b" id="bZoomFit">화면 맞춤</button>
     <span class="sep"></span>
     <input type="range" id="bTime" min="0" max="1000" value="0" aria-label="시간">
     <span class="score" id="bAge">2억 5000만 년 전</span>
