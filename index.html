@@ -250,8 +250,9 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
           values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10"/>
       </filter>
     </defs>
-    <!-- 판게아는 지도 좌표계 위쪽으로 삐져나가므로 바다를 넉넉히 깔아 둔다 -->
-    <rect x="-400" y="-400" width="2000" height="1400" fill="url(#seaGrad2)"/>
+    <!-- 판게아가 지도 좌표계 밖으로 삐져나가고, 최소 배율(0.4x)로 축소하면
+         화면 틀보다 훨씬 넓게 보이므로 바다를 넉넉히 깔아 둔다 -->
+    <rect x="-1700" y="-1300" width="4600" height="3000" fill="url(#seaGrad2)"/>
     <g id="bPieces" filter="url(#fuse)"></g>
     <!-- 해령은 뭉치는 필터 밖에 두어야 선이 뭉개지지 않는다 -->
     <g id="bRidges" pointer-events="none"></g>
@@ -1033,14 +1034,18 @@ let B_FRAME = [0, 0, 1200, 600];  // 조각을 만든 뒤 계산한다
 /* 사용자 확대·이동. 판게아 초기 모양을 가까이 들여다볼 수 있게 한다.
    끌어서 옮기고, 휠이나 ＋/− 로 확대한다. */
 const bz = {k:1, dx:0, dy:0};
-const BZ_MIN = 1, BZ_MAX = 8;
+// 1배가 "화면 맞춤". 그 아래로도 물러날 수 있어야 전체를 여유 있게 본다.
+const BZ_MIN = 0.4, BZ_MAX = 8;
 
 function applyBreakView() {
   const [x, y, w, h] = B_FRAME;
   const cw = w / bz.k, ch = h / bz.k;
-  // 중심이 화면 틀 밖으로 나가지 않게 잡아 둔다
-  const cx = Math.min(Math.max(x + w/2 + bz.dx, x + cw/2), x + w - cw/2);
-  const cy = Math.min(Math.max(y + h/2 + bz.dy, y + ch/2), y + h - ch/2);
+  // 중심이 화면 틀 밖으로 나가지 않게 잡아 둔다. 틀보다 넓게 물러난 축소
+  // 상태에서는 잡아 둘 여지가 없으므로 그냥 가운데에 놓는다.
+  const cx = cw >= w ? x + w/2
+    : Math.min(Math.max(x + w/2 + bz.dx, x + cw/2), x + w - cw/2);
+  const cy = ch >= h ? y + h/2
+    : Math.min(Math.max(y + h/2 + bz.dy, y + ch/2), y + h - ch/2);
   bz.dx = cx - (x + w/2);
   bz.dy = cy - (y + h/2);
   bsvg.setAttribute("viewBox", [cx - cw/2, cy - ch/2, cw, ch]
@@ -1565,6 +1570,13 @@ function selftest() {
     bz.k = 1; bz.dx = bz.dy = 0; applyBreakView();
     return +zoomed.split(" ")[2] < +before.split(" ")[2] &&
            bsvg.getAttribute("viewBox") === before;
+  })());
+  ok("축소하면 화면이 넓어진다", (() => {
+    bz.k = 1; bz.dx = bz.dy = 0; applyBreakView();
+    const fit = +bsvg.getAttribute("viewBox").split(" ")[2];
+    bzoom(1 / 2); const out = +bsvg.getAttribute("viewBox").split(" ")[2];
+    bz.k = 1; bz.dx = bz.dy = 0; applyBreakView();
+    return out > fit;
   })());
   ok("확대 배율이 범위를 벗어나지 않는다", (() => {
     bzoom(100); const hi = bz.k;
