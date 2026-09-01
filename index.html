@@ -43,9 +43,6 @@ header{background:var(--panel);border-bottom:1px solid var(--line);
 .masthead{max-width:1180px;margin:0 auto;display:flex;align-items:baseline;
   flex-wrap:wrap;gap:4px 14px}
 h1{margin:0;font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:-.015em}
-.cheer{display:inline-block;vertical-align:.16em;margin-left:9px;font-family:inherit;
-  font-size:13.5px;font-weight:700;letter-spacing:0;color:#fff;background:var(--accent);
-  border-radius:999px;padding:3px 12px 4px;white-space:nowrap}
 .sub{margin:0;color:var(--muted);font-size:13px}
 .tabs{max-width:1180px;margin:12px auto 0;display:flex;gap:26px}
 .tabs button{appearance:none;border:0;background:none;color:var(--muted);
@@ -61,17 +58,21 @@ main{max-width:1180px;margin:0 auto;padding:20px 22px 48px}
 .mapwrap{position:relative}
 #bsvg{cursor:grab}
 #bsvg:active{cursor:grabbing}
+/* 버튼마다 따로 떨어뜨려 둔다. 한데 붙여 세로 막대로 두면 슬라이더(드래그로
+   조작하는 손잡이)처럼 보인다는 피드백이 있었다 - 눌러야 하는 버튼임을
+   분명히 하려고 각각 독립된 둥근 칩으로 그린다. */
 .zoomctl{position:absolute;top:14px;right:14px;display:flex;flex-direction:column;
-  background:var(--panel);border:1px solid var(--line);border-radius:10px;
-  box-shadow:0 2px 8px rgba(0,0,0,.15);overflow:hidden}
-.zoomctl button{appearance:none;border:none;background:none;width:38px;height:34px;
-  font-size:18px;font-weight:700;color:var(--ink);cursor:pointer;
-  border-bottom:1px solid var(--line)}
-.zoomctl button:last-child{border-bottom:none;font-size:14px}
+  gap:8px;align-items:flex-end}
+.zoomctl button{appearance:none;border:1px solid var(--line);background:var(--panel);
+  width:44px;height:44px;border-radius:10px;font-size:20px;font-weight:700;
+  color:var(--ink);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.15);
+  touch-action:manipulation}
 .zoomctl button:hover{background:var(--sunk)}
-.zoomctl button:disabled{opacity:.35;cursor:default;background:none}
-.zoomctl #bZoomLabel{font-size:11px;text-align:center;padding:3px 0;color:var(--muted);
-  border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.zoomctl button:disabled{opacity:.35;cursor:default;background:var(--panel)}
+.zoomctl #bZoomFit{width:auto;padding:0 12px;font-size:13px;white-space:nowrap}
+.zoomctl #bZoomLabel{font-size:11px;text-align:center;color:var(--muted);
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:2px 0;width:44px;font-variant-numeric:tabular-nums}
 svg.stage{display:block;width:100%;height:auto;border-radius:12px;
   border:1px solid var(--line);box-shadow:var(--shadow);touch-action:none;
   user-select:none;-webkit-user-select:none;background:#bcdcef}
@@ -150,7 +151,6 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
 @media (max-width:640px){
   header{padding:13px 15px 0} main{padding:14px 15px 32px}
   h1{font-size:20px} .tabs{gap:18px} .tabs button{font-size:14px}
-  .cheer{font-size:12px;margin-left:0;margin-top:5px;display:block;width:fit-content}
   input[type=range]{width:130px}
 }
 </style>
@@ -158,7 +158,7 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
 <body>
 <header>
   <div class="masthead">
-    <h1>대륙은 왜 움직일까 <span class="cheer">2학년 2반 화이팅!</span></h1>
+    <h1>대륙은 왜 움직일까</h1>
     <p class="sub">중학교 2학년 · 대륙이동설의 증거와 판 구조론</p>
   </div>
   <div class="tabs" role="tablist">
@@ -272,10 +272,10 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
     <g id="bLabels" pointer-events="none"></g>
   </svg>
   <div class="zoomctl">
-    <button id="bZoomIn" aria-label="확대">＋</button>
+    <button type="button" id="bZoomIn" aria-label="확대">＋</button>
     <span id="bZoomLabel">1.0×</span>
-    <button id="bZoomOut" aria-label="축소">−</button>
-    <button id="bZoomFit" aria-label="화면 맞춤" title="화면 맞춤">⤢</button>
+    <button type="button" id="bZoomOut" aria-label="축소">−</button>
+    <button type="button" id="bZoomFit" aria-label="처음 크기로">처음 크기</button>
   </div>
   </div>
 
