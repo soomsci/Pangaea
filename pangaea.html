@@ -121,6 +121,7 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
   font-weight:600;opacity:0;transition:.28s;pointer-events:none;z-index:9;
   box-shadow:0 8px 26px -8px rgba(0,0,0,.45)}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+#confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:10}
 
 /* --- 퍼즐 조각 --- */
 .piece{cursor:grab}
@@ -344,6 +345,7 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
 </section>
 </main>
 <div id="toast"></div>
+<canvas id="confetti"></canvas>
 <script>
 "use strict";
 /* =========================================================================
@@ -744,7 +746,62 @@ function score() {
   const d = done(), t = total();
   $("#score").textContent = `맞춘 대륙 ${d} / ${t}`;
   $("#hint").textContent = mode === "puzzle" ? S().hint : "";
-  if (d === t && t > 0 && mode === "puzzle") toast(S().done);
+  if (d === t && t > 0 && mode === "puzzle") { toast(S().done); confetti(); }
+}
+
+/* 정답(단계 완성) 때 터지는 폭죽. 캔버스 하나로 그리고 끝나면 지운다. */
+const CONFETTI_COLORS = ["#e0973c", "#6ea85e", "#d0654f", "#4f7fa8", "#9b6fb8", "#c9ad3e"];
+let confettiRaf = 0;
+function confetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const canvas = $("#confetti");
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  canvas.width = innerWidth * dpr;
+  canvas.height = innerHeight * dpr;
+  canvas.style.width = innerWidth + "px";
+  canvas.style.height = innerHeight + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const N = 140;
+  const parts = Array.from({length: N}, () => ({
+    x: innerWidth / 2 + (Math.random() - 0.5) * 60,
+    y: innerHeight * 0.35 + (Math.random() - 0.5) * 40,
+    vx: (Math.random() - 0.5) * 11,
+    vy: -(Math.random() * 9 + 4),
+    size: Math.random() * 6 + 4,
+    rot: Math.random() * Math.PI * 2,
+    vr: (Math.random() - 0.5) * 0.3,
+    color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+  }));
+
+  cancelAnimationFrame(confettiRaf);
+  const gravity = 0.32, drag = 0.992;
+  const t0 = performance.now();
+  function step(now) {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    let alive = false;
+    const age = (now - t0) / 1000;
+    const fade = Math.max(0, 1 - age / 2.2);   // 2.2초에 걸쳐 사라진다
+    for (const p of parts) {
+      p.vy += gravity; p.vx *= drag; p.vy *= drag;
+      p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+      if (p.y < innerHeight + 20) alive = true;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 3, p.size, p.size * 0.66);
+      ctx.restore();
+    }
+    if (alive && fade > 0) {
+      confettiRaf = requestAnimationFrame(step);
+    } else {
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+    }
+  }
+  confettiRaf = requestAnimationFrame(step);
 }
 
 /* 250 -> "약 2억 5000만 년 전" */
