@@ -190,6 +190,31 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
   </div>
   </div>
 
+  <!-- 증거 켜고 끄기는 지도 위쪽에 둔다. 화석처럼 이름별로 켜는 버튼은
+       지도 아래에 있으면 화면을 스크롤해야 보였다. -->
+  <div class="console">
+  <div class="bar">
+    <span class="tag">증거</span>
+    <label class="chk"><input type="checkbox" id="cBelt"> 산맥 연결</label>
+    <label class="chk"><input type="checkbox" id="cFossil"> 화석 분포</label>
+    <label class="chk"><input type="checkbox" id="cGlacier"> 빙하 흔적</label>
+    <label class="chk"><input type="checkbox" id="cShelf"> 대륙붕</label>
+  </div>
+
+  <div class="bar" id="evLegend" style="display:none;flex-direction:column;align-items:flex-start;gap:7px">
+    <div id="fossilLegend" style="display:none">
+      <div style="font-size:13.5px;color:var(--muted);margin-bottom:6px">
+        이름을 눌러 하나씩 볼 수 있습니다.</div>
+      <div id="fossilKeys" style="display:flex;flex-wrap:wrap;gap:14px"></div>
+    </div>
+    <div id="glacierLegend" style="display:none;font-size:13.5px;color:var(--muted)">
+      <span style="display:inline-block;width:22px;height:13px;border-radius:7px;
+        background:#eaf6ff;border:2px dashed #4a90c4;vertical-align:-2px"></span>
+      빙하가 깎고 간 흔적
+    </div>
+  </div>
+  </div>
+
   <svg class="stage" id="svg" viewBox="0 0 1200 600" role="img"
        aria-label="세계 지도. 대륙 조각을 끌어다 판게아를 맞추는 퍼즐">
     <defs>
@@ -224,26 +249,6 @@ button.fxkey .cnt{color:var(--muted);font-size:12.5px;font-weight:400}
     <div id="event" style="flex-basis:100%;font-size:13.5px;color:var(--muted)"></div>
   </div>
 
-  <div class="bar">
-    <span class="tag">증거</span>
-    <label class="chk"><input type="checkbox" id="cBelt"> 산맥 연결</label>
-    <label class="chk"><input type="checkbox" id="cFossil"> 화석 분포</label>
-    <label class="chk"><input type="checkbox" id="cGlacier"> 빙하 흔적</label>
-    <label class="chk"><input type="checkbox" id="cShelf"> 대륙붕</label>
-  </div>
-
-  <div class="bar" id="evLegend" style="display:none;flex-direction:column;align-items:flex-start;gap:7px">
-    <div id="fossilLegend" style="display:none">
-      <div style="font-size:13.5px;color:var(--muted);margin-bottom:6px">
-        이름을 눌러 하나씩 볼 수 있습니다.</div>
-      <div id="fossilKeys" style="display:flex;flex-wrap:wrap;gap:14px"></div>
-    </div>
-    <div id="glacierLegend" style="display:none;font-size:13.5px;color:var(--muted)">
-      <span style="display:inline-block;width:22px;height:13px;border-radius:7px;
-        background:#eaf6ff;border:2px dashed #4a90c4;vertical-align:-2px"></span>
-      빙하가 깎고 간 흔적
-    </div>
-  </div>
   </div>
 
   <p class="note" id="hint"></p>
